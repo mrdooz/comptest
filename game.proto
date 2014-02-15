@@ -1,0 +1,118 @@
+package swarm.game;
+
+//-----------------------------------------------------------------------------
+message Vector2
+{
+	optional float x = 1;
+	optional float y = 2;
+}
+
+//-----------------------------------------------------------------------------
+message PlayerJoined
+{
+	optional string name = 1;
+}
+
+//-----------------------------------------------------------------------------
+message PlayerLeft
+{
+	optional string name = 1;
+}
+
+//-----------------------------------------------------------------------------
+message Monster
+{
+	optional Vector2 acc = 1;
+	optional Vector2 vel = 2;
+	optional Vector2 pos = 3;
+	optional float size = 4;
+}
+
+//-----------------------------------------------------------------------------
+message SwarmState
+{
+	repeated Monster monster = 1;
+}
+
+//-----------------------------------------------------------------------------
+message Player
+{
+	// message about a generic player (from server -> client)
+	optional uint32 id = 1;
+	optional Vector2 acc = 2;
+	optional Vector2 vel = 3;
+	optional Vector2 pos = 4;
+	optional int32 health = 5;
+}
+
+//-----------------------------------------------------------------------------
+message PlayerClick
+{
+	optional Vector2 click_pos = 1;
+	optional float click_size = 2;
+}
+
+//-----------------------------------------------------------------------------
+message PlayerState
+{
+	repeated Player player = 1;
+}
+
+//-----------------------------------------------------------------------------
+message GameStarted
+{
+	optional uint32 player_id = 1;
+	optional string map_name = 2;
+	optional PlayerState player_state = 3;
+	optional SwarmState swarm_state = 4;
+}
+
+//-----------------------------------------------------------------------------
+message ServerMessage
+{
+	// wrapper message type. server -> player
+	
+	enum Type
+	{ 
+		GAME_STARTED	= 0;
+		PLAYER_JOINED 	= 1;
+		PLAYER_LEFT 	= 2;
+		SWARM_STATE 	= 3;
+		PLAYER_STATE	= 4;
+	}
+	
+	required Type type = 1;
+	
+	optional GameStarted game_started = 2;
+	optional PlayerJoined player_joined = 3;
+	optional PlayerLeft player_left = 4;
+	optional SwarmState swarm_state = 5;
+	optional PlayerState player_state = 6;
+}
+
+//-----------------------------------------------------------------------------
+message PlayerMessage
+{
+	// wrapper for player -> server
+	enum Type
+	{
+		PLAYER_POS 		= 1;
+		PLAYER_CLICK	= 2;
+	}
+	
+	required Type type = 1;
+	
+	optional Vector2 pos = 2;
+	optional PlayerClick click = 3;
+}
+
+//-----------------------------------------------------------------------------
+message Config
+{
+	optional string map_name = 1;
+	optional uint32 num_monsters = 2 [default = 20];
+	optional uint32 min_players = 3 [default = 2];
+	optional uint32 max_players = 4 [default = 4];
+	repeated float aa = 5;
+	repeated uint32 bb = 6;
+}

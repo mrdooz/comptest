@@ -1,0 +1,10 @@
+*.swp
+.idea/*
+CMakeCache.txt
+CMakeFiles/*
+CMakeScripts/*
+cmake_install.cmake
+comptest.xcodeproj/*
+*.pb.cc
+*.pb.h
+tjong
