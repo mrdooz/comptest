@@ -8,3 +8,12 @@ comptest.xcodeproj/*
 *.pb.cc
 *.pb.h
 tjong
+Debug/*
+Win32/*
+*.vcxproj
+*.sln
+*.filters
+*.sdf
+*.suo
+*.opensdf
+comptest.dir/*

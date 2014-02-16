@@ -1,4 +1,10 @@
 package swarm.game;
+import "google/protobuf/descriptor.proto";
+extend google.protobuf.FieldOptions
+{
+  // used to specify fixed size repeated fields (eg vector2, vector3)
+  optional int32 fixed_size = 50000;
+}
 
 //-----------------------------------------------------------------------------
 message Vector2
@@ -113,6 +119,6 @@ message Config
 	optional uint32 num_monsters = 2 [default = 20];
 	optional uint32 min_players = 3 [default = 2];
 	optional uint32 max_players = 4 [default = 4];
-	repeated float aa = 5;
-	repeated uint32 bb = 6;
+	repeated float aa = 5 [(fixed_size) = 3];
+	repeated uint32 bb = 6 [(fixed_size) = 4];
 }
