@@ -82,7 +82,13 @@ bool CodeGenerator::Generate(
     google::protobuf::compiler::OutputDirectory *output_directory,
     std::string *error) const
 {
-  FILE* f = fopen("tjong", "wt");
+  string filename(file->name());
+  // replace extension with "_bindings.cpp"
+  size_t extPos = filename.find('.');
+  if (extPos != string::npos)
+    filename.replace(extPos, filename.size() - extPos + 1, "_bindings.cpp");
+
+  FILE* f = fopen(filename.c_str(), "wt");
 
   for (int i = 0; i < file->message_type_count(); ++i)
   {
