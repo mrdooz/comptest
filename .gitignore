@@ -9,6 +9,7 @@ comptest.xcodeproj/*
 *.pb.h
 tjong
 Debug/*
+Release/*
 Win32/*
 *.vcxproj
 *.sln

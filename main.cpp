@@ -44,30 +44,32 @@ string ExpandToNamespace(const string& str, vector<string>* splits)
   return res;
 }
 
+//[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; cfg->data->set_length(*(float*)value); if (cfg->dirty) *cfg->dirty = true; },
+
 //------------------------------------------------------------------------------
 const char getSetTemplate[] = 
   "\t// Add {{FIELD_NAME}}\n\tTwAddVarCB(bar, \"{{FIELD_NAME}}\", {{TW_TYPE}},\n"\
-  "\t\t[](const void* value, void* data) { (({{FIELD_TYPE}}*)(data))->set_{{FIELD_NAME}}(*({{CPP_TYPE}}*)value); },\n"\
-  "\t\t[](void* value, void* data) { *({{CPP_TYPE}}*)value = (({{FIELD_TYPE}}*)(data))->{{FIELD_NAME}}(); }, data, nullptr);\n\n";
+  "\t\t[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; cfg->data->set_{{FIELD_NAME}}(*({{CPP_TYPE}}*)value); if (cfg->dirty) *cfg->dirty = true; },\n"\
+  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; *({{CPP_TYPE}}*)value = cfg->data->{{FIELD_NAME}}(); }, (void*)&cfg, nullptr);\n\n";
 
 const char getSetRepeatedTemplate[] =
   "\t// Add {{FIELD_NAME}}\n\tTwAddVarCB(bar, \"{{FIELD_NAME}}\", {{TW_TYPE}},\n"\
-  "\t\t[](const void* value, void* data) { memcpy((({{FIELD_TYPE}}*)(data))->mutable_{{FIELD_NAME}}()->mutable_data(), value, {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); },\n"\
-  "\t\t[](void* value, void* data) { memcpy(value, (({{FIELD_TYPE}}*)(data))->{{FIELD_NAME}}().data(), {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); }, data, nullptr);\n\n";
+  "\t\t[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; memcpy(cfg->data->mutable_{{FIELD_NAME}}()->mutable_data(), value, {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); },\n"\
+  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; memcpy(value, cfg->data->{{FIELD_NAME}}().data(), {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); }, (void*)&cfg, nullptr);\n\n";
 
 //------------------------------------------------------------------------------
 string ApplyTemplate(
     const string& twType,
     const string& cppType,
     const string& fieldName,
-    const string& fieldType,
+    const string& msgType,
     int repeatCount = 0)
 {
   string res(repeatCount > 0 ? getSetRepeatedTemplate : getSetTemplate);
   boost::algorithm::replace_all(res, "{{TW_TYPE}}", twType);
   boost::algorithm::replace_all(res, "{{CPP_TYPE}}", cppType);
-  boost::algorithm::replace_all(res, "{{FIELD_TYPE}}", fieldType);
   boost::algorithm::replace_all(res, "{{FIELD_NAME}}", fieldName);
+  boost::algorithm::replace_all(res, "{{MSG_TYPE}}", msgType);
   if (repeatCount > 0)
   {
     char buf[16];
@@ -77,6 +79,13 @@ string ApplyTemplate(
   return res;
 }
 
+//------------------------------------------------------------------------------
+string TabToSpace(const char* str)
+{
+  string res(str);
+  boost::algorithm::replace_all(res, "\t", "  ");
+  return res;
+}
 
 //------------------------------------------------------------------------------
 class CodeGenerator : public google::protobuf::compiler::CodeGenerator
@@ -150,13 +159,18 @@ bool CodeGenerator::Generate(
     const google::protobuf::Descriptor* desc = file->message_type(i);
 
     // create a twbar per message
-    string typeName = ExpandToNamespace(desc->full_name(), nullptr);
+    string msgType = ExpandToNamespace(desc->full_name(), nullptr);
 
     // add declaration to the hpp
-    fprintf(fHpp, "void Bind%s(%s* data);\n", desc->name().c_str(), typeName.c_str());
+    fprintf(fHpp, "void Bind%s(%s* data, bool *dirty);\n", desc->name().c_str(), msgType.c_str());
 
     // add definition to the cpp
-    fprintf(fCpp, "void Bind%s(%s* data)\n{\n", desc->name().c_str(), typeName.c_str());
+    fprintf(fCpp, "void Bind%s(%s* data, bool *dirty)\n{\n", desc->name().c_str(), msgType.c_str());
+
+    // print the Cfg struct
+    fprintf(fCpp, TabToSpace("\tstruct Cfg\n\t{\n\t\t%s* data;\n\t\t\tbool *dirty;\n\t};\n\n").c_str(), desc->name().c_str());
+    fprintf(fCpp, TabToSpace("\tstatic Cfg cfg;\n\tcfg.data = data;\n\tcfg.dirty = dirty;\n\n").c_str());
+
     fprintf(fCpp, "\tTwBar* bar = TwNewBar(\"%s\");\n", desc->full_name().c_str());
     for (int j = 0; j < desc->field_count(); ++j)
     {
@@ -173,13 +187,13 @@ bool CodeGenerator::Generate(
       switch (fieldDesc->cpp_type())
       {
       case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
-        fprintf(fCpp, "%s", ApplyTemplate("TW_TYPE_BOOLCPP", "bool", fieldName, typeName, repeatCount).c_str());
+        fputs(TabToSpace(ApplyTemplate("TW_TYPE_BOOLCPP", "bool", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
         break;
       case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
-        fprintf(fCpp, "%s", ApplyTemplate("TW_TYPE_INT32", "int32_t", fieldName, typeName, repeatCount).c_str());
+        fputs(TabToSpace(ApplyTemplate("TW_TYPE_INT32", "int32_t", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
         break;
       case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
-        fprintf(fCpp, "%s", ApplyTemplate("TW_TYPE_UINT32", "uint32_t", fieldName, typeName, repeatCount).c_str());
+        fputs(TabToSpace(ApplyTemplate("TW_TYPE_UINT32", "uint32_t", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
         break;
       case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
         {
@@ -188,7 +202,7 @@ bool CodeGenerator::Generate(
           if (col3f) { repeatCount = 3; twType = "TW_TYPE_COLOR3F"; }
           if (col4f) { repeatCount = 4; twType = "TW_TYPE_COLOR4F"; }
           if (dir3f) { repeatCount = 3; twType = "TW_TYPE_DIR3F"; }
-          fprintf(fCpp, "%s", ApplyTemplate(twType, "float", fieldName, typeName, repeatCount).c_str());
+          fputs(TabToSpace(ApplyTemplate(twType, "float", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
           break;
         }
       }
