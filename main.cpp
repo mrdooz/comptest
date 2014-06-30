@@ -44,18 +44,16 @@ string ExpandToNamespace(const string& str, vector<string>* splits)
   return res;
 }
 
-//[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; cfg->data->set_length(*(float*)value); if (cfg->dirty) *cfg->dirty = true; },
-
 //------------------------------------------------------------------------------
 const char getSetTemplate[] = 
   "\t// Add {{FIELD_NAME}}\n\tTwAddVarCB(bar, \"{{FIELD_NAME}}\", {{TW_TYPE}},\n"\
   "\t\t[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; cfg->data->set_{{FIELD_NAME}}(*({{CPP_TYPE}}*)value); if (cfg->dirty) *cfg->dirty = true; },\n"\
-  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; *({{CPP_TYPE}}*)value = cfg->data->{{FIELD_NAME}}(); }, (void*)&cfg, nullptr);\n\n";
+  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; *({{CPP_TYPE}}*)value = cfg->data->{{FIELD_NAME}}(); }, (void*)&cfg, {{CLIENT_DATA}});\n\n";
 
 const char getSetRepeatedTemplate[] =
   "\t// Add {{FIELD_NAME}}\n\tTwAddVarCB(bar, \"{{FIELD_NAME}}\", {{TW_TYPE}},\n"\
   "\t\t[](const void* value, void* data) { Cfg* cfg = (Cfg*)data; memcpy(cfg->data->mutable_{{FIELD_NAME}}()->mutable_data(), value, {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); },\n"\
-  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; memcpy(value, cfg->data->{{FIELD_NAME}}().data(), {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); }, (void*)&cfg, nullptr);\n\n";
+  "\t\t[](void* value, void* data) { Cfg* cfg = (Cfg*)data; memcpy(value, cfg->data->{{FIELD_NAME}}().data(), {{REPEAT_COUNT}} * sizeof({{CPP_TYPE}})); }, (void*)&cfg, {{CLIENT_DATA}});\n\n";
 
 //------------------------------------------------------------------------------
 string ApplyTemplate(
@@ -63,13 +61,15 @@ string ApplyTemplate(
     const string& cppType,
     const string& fieldName,
     const string& msgType,
-    int repeatCount = 0)
+    int repeatCount,
+    const string& clientData)
 {
   string res(repeatCount > 0 ? getSetRepeatedTemplate : getSetTemplate);
   boost::algorithm::replace_all(res, "{{TW_TYPE}}", twType);
   boost::algorithm::replace_all(res, "{{CPP_TYPE}}", cppType);
   boost::algorithm::replace_all(res, "{{FIELD_NAME}}", fieldName);
   boost::algorithm::replace_all(res, "{{MSG_TYPE}}", msgType);
+  boost::algorithm::replace_all(res, "{{CLIENT_DATA}}", clientData.empty() ? "nullptr" : (string("\"") + clientData + string("\"")));
   if (repeatCount > 0)
   {
     char buf[16];
@@ -171,40 +171,59 @@ bool CodeGenerator::Generate(
     fprintf(fCpp, TabToSpace("\tstruct Cfg\n\t{\n\t\t%s* data;\n\t\t\tbool *dirty;\n\t};\n\n").c_str(), desc->name().c_str());
     fprintf(fCpp, TabToSpace("\tstatic Cfg cfg;\n\tcfg.data = data;\n\tcfg.dirty = dirty;\n\n").c_str());
 
-    fprintf(fCpp, "\tTwBar* bar = TwNewBar(\"%s\");\n", desc->full_name().c_str());
+    fprintf(fCpp, TabToSpace("\tTwBar* bar = TwNewBar(\"%s\");\n").c_str(), desc->full_name().c_str());
     for (int j = 0; j < desc->field_count(); ++j)
     {
       const google::protobuf::FieldDescriptor* fieldDesc = desc->field(j);
       const char* fieldName = fieldDesc->name().c_str();
 
+      // check for extensions
       const google::protobuf::FieldOptions& options = fieldDesc->options();
       bool col3f = options.HasExtension(anttweak::color3f) && options.GetExtension(anttweak::color3f);
       bool col4f = options.HasExtension(anttweak::color4f) && options.GetExtension(anttweak::color4f);
       bool dir3f = options.HasExtension(anttweak::dir3f) && options.GetExtension(anttweak::dir3f);
+
+      char clientData[256] = {0};
+      char* clientDataPtr = clientData;
+      if (options.HasExtension(anttweak::minF))   clientDataPtr += sprintf(clientDataPtr, "min=%f ", options.GetExtension(anttweak::minF));
+      if (options.HasExtension(anttweak::maxF))   clientDataPtr += sprintf(clientDataPtr, "max=%f ", options.GetExtension(anttweak::maxF));
+      if (options.HasExtension(anttweak::stepF))  clientDataPtr += sprintf(clientDataPtr, "step=%f ", options.GetExtension(anttweak::stepF));
+
+      if (options.HasExtension(anttweak::minI))   clientDataPtr += sprintf(clientDataPtr, "min=%d ", options.GetExtension(anttweak::minI));
+      if (options.HasExtension(anttweak::maxI))   clientDataPtr += sprintf(clientDataPtr, "max=%d ", options.GetExtension(anttweak::maxI));
+      if (options.HasExtension(anttweak::stepI))  clientDataPtr += sprintf(clientDataPtr, "step=%d ", options.GetExtension(anttweak::stepI));
+
+      bool noBind = options.HasExtension(anttweak::nobind) && options.GetExtension(anttweak::nobind);
+      if (noBind)
+        continue;
+
       int repeatCount = 0;
 
       // add bindings for the types we support
       switch (fieldDesc->cpp_type())
       {
-      case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
-        fputs(TabToSpace(ApplyTemplate("TW_TYPE_BOOLCPP", "bool", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
-        break;
-      case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
-        fputs(TabToSpace(ApplyTemplate("TW_TYPE_INT32", "int32_t", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
-        break;
-      case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
-        fputs(TabToSpace(ApplyTemplate("TW_TYPE_UINT32", "uint32_t", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
-        break;
-      case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
-        {
-          string twType = "TW_TYPE_FLOAT";
-
-          if (col3f) { repeatCount = 3; twType = "TW_TYPE_COLOR3F"; }
-          if (col4f) { repeatCount = 4; twType = "TW_TYPE_COLOR4F"; }
-          if (dir3f) { repeatCount = 3; twType = "TW_TYPE_DIR3F"; }
-          fputs(TabToSpace(ApplyTemplate(twType, "float", fieldName, msgType, repeatCount).c_str()).c_str(), fCpp);
+        case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
+          fputs(TabToSpace(ApplyTemplate("TW_TYPE_BOOLCPP", "bool", fieldName, msgType, repeatCount, "").c_str()).c_str(), fCpp);
           break;
-        }
+
+        case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
+          fputs(TabToSpace(ApplyTemplate("TW_TYPE_INT32", "int32_t", fieldName, msgType, repeatCount, clientData).c_str()).c_str(), fCpp);
+          break;
+
+        case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
+          fputs(TabToSpace(ApplyTemplate("TW_TYPE_UINT32", "uint32_t", fieldName, msgType, repeatCount, clientData).c_str()).c_str(), fCpp);
+          break;
+
+        case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
+          {
+            string twType = "TW_TYPE_FLOAT";
+
+            if (col3f) { repeatCount = 3; twType = "TW_TYPE_COLOR3F"; }
+            if (col4f) { repeatCount = 4; twType = "TW_TYPE_COLOR4F"; }
+            if (dir3f) { repeatCount = 3; twType = "TW_TYPE_DIR3F"; }
+            fputs(TabToSpace(ApplyTemplate(twType, "float", fieldName, msgType, repeatCount, repeatCount == 0 ? clientData : "").c_str()).c_str(), fCpp);
+            break;
+          }
       }
     }
     fprintf(fCpp, "}\n");
