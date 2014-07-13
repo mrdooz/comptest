@@ -171,6 +171,8 @@ bool CodeGenerator::Generate(
     fprintf(fCpp, TabToSpace("\tstruct Cfg\n\t{\n\t\t%s* data;\n\t\t\tbool *dirty;\n\t};\n\n").c_str(), desc->name().c_str());
     fprintf(fCpp, TabToSpace("\tstatic Cfg cfg;\n\tcfg.data = data;\n\tcfg.dirty = dirty;\n\n").c_str());
 
+    fprintf(fCpp, "#if WITH_ANT_TWEAK_BAR\n");
+
     fprintf(fCpp, TabToSpace("\tTwBar* bar = TwNewBar(\"%s\");\n").c_str(), desc->full_name().c_str());
     for (int j = 0; j < desc->field_count(); ++j)
     {
@@ -226,6 +228,9 @@ bool CodeGenerator::Generate(
           }
       }
     }
+
+    fprintf(fCpp, "#endif\n");
+
     fprintf(fCpp, "}\n");
   }
 
